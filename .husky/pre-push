@@ -5,6 +5,13 @@
 # enforces both). Keep this hook as a PATH/npm sanity check + reminder.
 # Intentionally excludes test:unit / typecheck (slow; covered by CI).
 
+# Personal fork reminder (local use only — see _notes/GIT-FORK-WORKFLOW.md).
+remote_name="$1"
+if [ "$remote_name" = "upstream" ]; then
+  echo "⚠️  Push indo para 'upstream' (repo original) — provavelmente vai falhar com 403 (esperado)."
+  echo "    Para salvar seu trabalho use: git push origin"
+fi
+
 if ! command -v npm >/dev/null 2>&1; then
   echo "⚠️  npm not found in PATH — skipping pre-push hooks"
   echo "   Run 'npm run check:any-budget:t11 && npm run check:tracked-artifacts' manually before pushing."
