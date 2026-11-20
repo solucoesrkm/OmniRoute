@@ -1,9 +1,8 @@
-// The IP allow/deny list has to judge the address of the connection unless a proxy that may be
-// trusted sits in front: a loopback or private-network proxy, a Cloudflare edge, or an address
-// the operator names in OMNIROUTE_TRUSTED_PROXIES. A direct client on a public address can put
-// any value in X-Forwarded-For, X-Real-IP or CF-Connecting-IP, so those headers must not change
-// who the filter thinks it is talking to; behind a trusted proxy, only what the proxy itself
-// added counts, not whatever the client sent ahead of it.
+// The IP allow/deny list has to judge the address of the connection unless an explicitly trusted
+// proxy sits in front: loopback, a Cloudflare edge, or an address the operator names in
+// OMNIROUTE_TRUSTED_PROXIES. Direct clients on public or private networks can put any value in
+// X-Forwarded-For, X-Real-IP or CF-Connecting-IP, so those headers must not change who the filter
+// thinks it is talking to; behind a trusted proxy, only what the proxy itself added counts.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -113,22 +112,25 @@ test("a loopback proxy is still trusted to report the client address", async () 
   );
 });
 
-test("a proxy on a private network is still trusted to report the client address", async () => {
-  blacklist(BLOCKED);
+test("a private-network peer cannot spoof its address unless explicitly configured as a proxy", async () => {
+  whitelist(ALLOWED);
 
   for (const proxy of ["10.1.2.3", "172.18.0.2", "192.168.1.5", "100.64.0.9"]) {
     assert.equal(
-      await blockedByIpFilter(stampedRequest(proxy, { "x-forwarded-for": BLOCKED })),
+      await blockedByIpFilter(stampedRequest(proxy, { "x-forwarded-for": ALLOWED })),
       true,
-      proxy
+      `untrusted private peer ${proxy} must be judged by its socket address`
     );
   }
 
-  ipFilter.resetIPFilter();
-  whitelist(ALLOWED);
+  process.env.OMNIROUTE_TRUSTED_PROXIES = "10.1.2.3";
   assert.equal(
     await blockedByIpFilter(stampedRequest("10.1.2.3", { "x-forwarded-for": ALLOWED })),
     false
+  );
+  assert.equal(
+    await blockedByIpFilter(stampedRequest("10.1.2.3", { "x-forwarded-for": BLOCKED })),
+    true
   );
 });
 

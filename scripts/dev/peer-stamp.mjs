@@ -23,8 +23,8 @@ export const PEER_IP_HEADER = "x-omniroute-peer-ip";
 
 /**
  * Companion header to PEER_IP_HEADER: `<token>|1` when the inbound TCP request
- * came from a peer that may be a reverse proxy (this host, a private-network
- * address, a Cloudflare edge or an address named in OMNIROUTE_TRUSTED_PROXIES)
+ * came from a peer that may be a reverse proxy (this host, a Cloudflare edge
+ * or an address named in OMNIROUTE_TRUSTED_PROXIES)
  * and carried a forwarding header (see `hasProxyHopHeader`), or arrived
  * from a Cloudflare edge IP with `cf-connecting-ip`; `<token>|0` otherwise.
  * Required so the middleware can tell that a loopback socket is the
@@ -210,17 +210,6 @@ export function hasProxyHopHeader(headers) {
   return false;
 }
 
-// Same ranges as PRIVATE_LAN_PATTERNS in src/server/authz/routeGuard.ts
-// (tests/unit/authz/peer-stamp.test.ts checks they agree).
-const PRIVATE_LAN_PATTERNS = [
-  /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
-  /^100\.(6[4-9]|[78]\d|9\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}$/,
-  /^192\.168\.\d{1,3}\.\d{1,3}$/,
-  /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/,
-  /^f[cd][0-9a-f]{2}:/i,
-  /^fe80:/i,
-];
-
 /**
  * A plain IP address from a header value, or null. Accepts the forms proxies write:
  * `::ffff:a.b.c.d`, `a.b.c.d:port` and `[v6]:port`.
@@ -268,17 +257,14 @@ function isConfiguredProxy(ip) {
 }
 
 /**
- * True when a forwarding header from this TCP peer may be believed: the peer is this host, a
- * private-network proxy, a Cloudflare edge, or an address the operator lists in
- * OMNIROUTE_TRUSTED_PROXIES (a proxy on any other public address has to be named there). A
- * client on any other address can write those headers itself, so they say nothing about who
- * it is.
+ * True when a forwarding header from this TCP peer may be believed: the peer is loopback, a
+ * Cloudflare edge, or an address the operator lists in OMNIROUTE_TRUSTED_PROXIES. Private-network
+ * peers are not implicitly trusted because direct clients can connect from the LAN too.
  */
 export function isTrustedProxyPeer(ip) {
   const normalized = normalizeIp(ip);
   if (!normalized) return false;
   if (normalized === "::1" || normalized.startsWith("127.")) return true;
-  if (PRIVATE_LAN_PATTERNS.some((re) => re.test(normalized))) return true;
   return isCloudflareIP(normalized) || isConfiguredProxy(normalized);
 }
 

@@ -20,7 +20,6 @@ const {
   resolveClientIp,
   CLIENT_IP_HEADER,
 } = peerStamp;
-const { isPrivateLanHost } = await import("../../../src/server/authz/routeGuard.ts");
 
 const ORIGINAL_STAMP_TOKEN = process.env.OMNIROUTE_PEER_STAMP_TOKEN;
 const ORIGINAL_TRUSTED_PROXIES = process.env.OMNIROUTE_TRUSTED_PROXIES;
@@ -118,11 +117,12 @@ test("x-forwarded-for from a public, non-proxy peer keeps via-proxy=0", () => {
   assert.equal(getViaProxy(req), "stamp-tok|0", "forged forwarding headers must not set via-proxy");
 });
 
-test("x-forwarded-for from a private-network proxy sets via-proxy=1", () => {
+test("forwarding headers from private-network peers are ignored by default", () => {
   for (const peer of ["10.1.2.3", "172.18.0.2", "192.168.1.5", "100.64.0.9", "fd00::2"]) {
     const req = makeReq(peer, { "x-forwarded-for": "203.0.113.99" });
     stampPeerIp(req);
-    assert.equal(getViaProxy(req), "stamp-tok|1", peer);
+    assert.equal(getViaProxy(req), "stamp-tok|0", peer);
+    assert.equal(getClient(req), `stamp-tok|${peer}`, peer);
   }
 });
 
@@ -207,7 +207,7 @@ test("F2-03: full-form IPv4-mapped address is normalized", () => {
 
 const getClient = (req: ReturnType<typeof makeReq>) => req.headers[CLIENT_IP_HEADER] ?? null;
 
-test("the trusted-proxy address classes agree with the LAN classes the route guard uses", () => {
+test("private-network peers are not trusted as proxies by default", () => {
   const samples = [
     "10.0.0.1",
     "10.255.255.254",
@@ -231,14 +231,11 @@ test("the trusted-proxy address classes agree with the LAN classes the route gua
     "::ffff:8.8.8.8",
   ];
   for (const ip of samples) {
-    const plain = ip.replace(/^::ffff:/i, "");
-    // isTrustedProxyPeer also accepts loopback, Cloudflare and configured proxies, none of
-    // which are in the samples, so for these it must equal the route guard's LAN verdict.
-    assert.equal(isTrustedProxyPeer(ip), isPrivateLanHost(plain), ip);
+    assert.equal(isTrustedProxyPeer(ip), false, `${ip} must not implicitly be a trusted proxy`);
   }
 });
 
-test("a proxy on an address the operator names is trusted, one that is not named is not", () => {
+test("private and public proxy peers are trusted only when explicitly configured", () => {
   const forwarded = { "x-forwarded-for": "203.0.113.99" };
   const unnamed = makeReq("198.51.100.7", forwarded);
   stampPeerIp(unnamed);
@@ -246,13 +243,14 @@ test("a proxy on an address the operator names is trusted, one that is not named
   assert.equal(getClient(unnamed), "stamp-tok|198.51.100.7");
 
   process.env.OMNIROUTE_TRUSTED_PROXIES =
-    "192.0.2.1, 198.51.100.0/24 ,2001:db8::/32,not-an-ip,10.0.0.0/99";
-  for (const peer of ["198.51.100.7", "2001:db8::42"]) {
+    "192.0.2.1, 198.51.100.0/24 ,2001:db8::/32,10.0.0.0/8,not-an-ip,10.0.0.0/99";
+  for (const peer of ["198.51.100.7", "2001:db8::42", "10.1.2.3"]) {
     const req = makeReq(peer, forwarded);
     stampPeerIp(req);
     assert.equal(getViaProxy(req), "stamp-tok|1", peer);
     assert.equal(getClient(req), "stamp-tok|203.0.113.99", peer);
   }
+  assert.equal(isTrustedProxyPeer("10.1.2.3"), true);
   assert.equal(isTrustedProxyPeer("192.0.2.1"), true);
   assert.equal(isTrustedProxyPeer("192.0.2.2"), false);
   assert.equal(isTrustedProxyPeer("2001:db9::1"), false);
@@ -279,6 +277,7 @@ test("a client-supplied client address header is replaced", () => {
 
 test("behind a trusted proxy the client is the right-most forwarded address that is not a proxy", () => {
   // nginx appends the connecting address to whatever the client sent.
+  process.env.OMNIROUTE_TRUSTED_PROXIES = "172.18.0.2,10.0.0.4";
   assert.equal(
     resolveClientIp({ "x-forwarded-for": "203.0.113.10, 203.0.113.9" }, "127.0.0.1"),
     "203.0.113.9"
@@ -302,6 +301,7 @@ test("behind a trusted proxy the client is the right-most forwarded address that
 });
 
 test("when every forwarded address is a proxy, the outermost one is the client", () => {
+  process.env.OMNIROUTE_TRUSTED_PROXIES = "172.18.0.2,10.1.1.5,192.168.1.9,10.0.0.2";
   assert.equal(resolveClientIp({ "x-forwarded-for": "10.1.1.5" }, "172.18.0.2"), "10.1.1.5");
   assert.equal(
     resolveClientIp({ "x-forwarded-for": "192.168.1.9, 10.0.0.2" }, "127.0.0.1"),
